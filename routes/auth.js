@@ -1,5 +1,5 @@
 const express = require("express");
-const bcrypt = require("bcryptjs");
+const bcrypt = require("bcrypt"); // تم التغيير هنا
 const router = express.Router();
 
 // كلمات السر المشفّرة مسبقًا
