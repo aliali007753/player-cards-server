@@ -1,18 +1,17 @@
 const express = require("express");
-const bcrypt = require("bcrypt"); // تم التغيير هنا
+const bcrypt = require("bcryptjs");
 const router = express.Router();
 
-// كلمات السر المشفّرة مسبقًا
+// كلمات السر مشفّرة مسبقًا وثابتة ✅
 const users = [
-  { username: "ali.khlaf", password: bcrypt.hashSync("ali00774411", 10), role: "admin" },
-  { username: "ahmed.Ibrahim", password: bcrypt.hashSync("aa00774411", 10), role: "moderator" },
-  { username: "Ibrahim.ahmed", password: bcrypt.hashSync("aa00774411", 10), role: "moderator" },
-  { username: "Ali.Adham", password: bcrypt.hashSync("aa00774411", 10), role: "moderator" },
-  { username: "AbuFatema", password: bcrypt.hashSync("aa00774411", 10), role: "moderator" },
-  { username: "ahmed.hazem", password: bcrypt.hashSync("aa00774411", 10), role: "moderator" }
+  { username: "ali.khlaf", password: "$2a$10$DYl65MSxxY2AG.n5QzyuGuLObe8wCdpqL2cJrJS.d1Gpm0YuhGL0q", role: "admin" },
+  { username: "ahmed.Ibrahim", password: "$2a$10$G25qYyKrZ6SCvHMcwcoMKuXucMWEFkVGVKGE7/P5iKZ2zWaERAw6S", role: "moderator" },
+  { username: "Ibrahim.ahmed", password: "$2a$10$G25qYyKrZ6SCvHMcwcoMKuXucMWEFkVGVKGE7/P5iKZ2zWaERAw6S", role: "moderator" },
+  { username: "Ali.Adham", password: "$2a$10$G25qYyKrZ6SCvHMcwcoMKuXucMWEFkVGVKGE7/P5iKZ2zWaERAw6S", role: "moderator" },
+  { username: "AbuFatema", password: "$2a$10$G25qYyKrZ6SCvHMcwcoMKuXucMWEFkVGVKGE7/P5iKZ2zWaERAw6S", role: "moderator" },
+  { username: "ahmed.hazem", password: "$2a$10$G25qYyKrZ6SCvHMcwcoMKuXucMWEFkVGVKGE7/P5iKZ2zWaERAw6S", role: "moderator" }
 ];
 
-// مسار تسجيل الدخول
 router.post("/login", (req, res) => {
   const { username, password } = req.body;
   const user = users.find((u) => u.username === username);
