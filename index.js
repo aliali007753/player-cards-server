@@ -4,8 +4,7 @@ const multer = require('multer');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const { MongoClient, ObjectId } = require('mongodb');
-const path = require('path');
-const fs = require('fs');
+const cloudinary = require('cloudinary').v2;
 require('dotenv').config();
 
 const app = express();
@@ -14,22 +13,21 @@ const uri = process.env.MONGODB_URI;
 const JWT_SECRET = process.env.JWT_SECRET;
 const ADMIN_KEY = process.env.ADMIN_KEY;
 
+// إعداد Cloudinary
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
 const client = new MongoClient(uri);
 
 app.use(cors());
 app.use(express.json());
 
-// إعداد مجلد رفع الصور
-const uploadFolder = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadFolder)) fs.mkdirSync(uploadFolder);
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadFolder),
-  filename: (req, file, cb) => cb(null, Date.now() + '-' + file.originalname)
-});
+// استخدام multer لتخزين الصورة في الذاكرة مؤقتاً
+const storage = multer.memoryStorage();
 const upload = multer({ storage });
-
-app.use('/uploads', express.static(uploadFolder));
 
 // ميدلوير تحقق التوكن والصلاحيات
 function authMiddleware(role = null) {
@@ -78,7 +76,6 @@ async function run() {
       console.log('Test user "admin" created with password "admin123"');
     }
 
-    // استدعاء دالة إنشاء المستخدم التجريبي
     await createTestUser();
 
     // تسجيل دخول
@@ -160,31 +157,49 @@ async function run() {
       }
     });
 
-    // إضافة لاعب جديد (مدير أو مشرف)
+    // إضافة لاعب جديد (مدير أو مشرف) مع رفع الصورة على Cloudinary
     app.post('/api/players', authMiddleware(), upload.single('image'), async (req, res) => {
       const { name, bio } = req.body;
-      const image = req.file ? `/uploads/${req.file.filename}` : null;
       const username = req.user.username;
 
-      if (!name || !bio || !image) {
+      if (!name || !bio || !req.file) {
         return res.status(400).json({ message: 'الاسم، السيرة، والصورة مطلوبة' });
       }
 
-      const newPlayer = {
-        name,
-        bio,
-        image,
-        views: 0,
-        createdBy: username,
-        createdAt: new Date(),
-        expireAt: new Date(Date.now() + 48 * 60 * 60 * 1000) // 48 ساعة صلاحية
-      };
+      try {
+        const streamUpload = (fileBuffer) => {
+          return new Promise((resolve, reject) => {
+            const stream = cloudinary.uploader.upload_stream(
+              { folder: 'players' },
+              (error, result) => {
+                if (error) return reject(error);
+                resolve(result);
+              }
+            );
+            stream.end(fileBuffer);
+          });
+        };
 
-      await players.insertOne(newPlayer);
+        const result = await streamUpload(req.file.buffer);
 
-      await users.updateOne({ username }, { $inc: { uploadCount: 1 } });
+        const newPlayer = {
+          name,
+          bio,
+          image: result.secure_url,
+          views: 0,
+          createdBy: username,
+          createdAt: new Date(),
+          expireAt: new Date(Date.now() + 48 * 60 * 60 * 1000) // 48 ساعة صلاحية
+        };
 
-      res.status(201).json({ message: 'تمت إضافة اللاعب' });
+        await players.insertOne(newPlayer);
+        await users.updateOne({ username }, { $inc: { uploadCount: 1 } });
+
+        res.status(201).json({ message: 'تمت إضافة اللاعب' });
+      } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: 'خطأ في رفع الصورة أو إضافة اللاعب' });
+      }
     });
 
     // حذف لاعب (مدير فقط)
