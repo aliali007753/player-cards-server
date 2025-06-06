@@ -22,14 +22,19 @@ cloudinary.config({
 
 const client = new MongoClient(uri);
 
-app.use(cors());
+// ✅ تم تعديل هذا السطر للسماح بطلبات من موقع Netlify فقط
+app.use(cors({
+  origin: 'https://dainty-entremet-f77e64.netlify.app',
+  credentials: true
+}));
+
 app.use(express.json());
 
 // استخدام multer لتخزين الصورة في الذاكرة مؤقتاً
 const storage = multer.memoryStorage();
 const upload = multer({ storage });
 
-// ميدلوير تحقق التوكن والصلاحيات
+// تحقق JWT وصلاحيات
 function authMiddleware(role = null) {
   return async (req, res, next) => {
     try {
@@ -43,7 +48,7 @@ function authMiddleware(role = null) {
       }
       next();
     } catch (error) {
-      res.status(401).json({ message: 'غير مصرح أو توكن غير صالح' });
+      res.status(401).json({ message: 'توكن غير صالح' });
     }
   };
 }
@@ -57,13 +62,10 @@ async function run() {
     const users = db.collection('users');
     const players = db.collection('players');
 
-    // دالة لإنشاء مستخدم اختبار (مدير)
+    // إنشاء مدير تجريبي
     async function createTestUser() {
       const existing = await users.findOne({ username: 'admin' });
-      if (existing) {
-        console.log('User "admin" already exists');
-        return;
-      }
+      if (existing) return;
       const hashedPass = await bcrypt.hash('admin123', 10);
       await users.insertOne({
         username: 'admin',
@@ -73,114 +75,91 @@ async function run() {
         uploadCount: 0,
         createdAt: new Date()
       });
-      console.log('Test user "admin" created with password "admin123"');
     }
 
     await createTestUser();
 
-    // تسجيل دخول
+    // تسجيل الدخول
     app.post('/api/login', async (req, res) => {
       const { username, password } = req.body;
       const user = await users.findOne({ username });
       if (!user) return res.status(401).json({ message: 'خطأ في اسم المستخدم أو كلمة المرور' });
 
       const validPass = await bcrypt.compare(password, user.password);
-      if (!validPass) return res.status(401).json({ message: 'خطأ في اسم المستخدم أو كلمة المرور' });
+      if (!validPass) return res.status(401).json({ message: 'كلمة المرور غير صحيحة' });
 
-      if (user.blocked) return res.status(403).json({ message: 'حسابك محظور' });
+      if (user.blocked) return res.status(403).json({ message: 'الحساب محظور' });
 
       const token = jwt.sign({ userId: user._id, username: user.username, role: user.role }, JWT_SECRET, { expiresIn: '8h' });
       res.json({ token, role: user.role, username: user.username });
     });
 
-    // إضافة مستخدم (مدير فقط)
+    // إضافة مستخدم جديد
     app.post('/api/users', authMiddleware('manager'), async (req, res) => {
       const { username, password, role } = req.body;
-      if (!username || !password || !role) return res.status(400).json({ message: 'جميع الحقول مطلوبة' });
-      if (role !== 'supervisor' && role !== 'manager') return res.status(400).json({ message: 'الدور غير صحيح' });
+      if (!username || !password || !role) return res.status(400).json({ message: 'البيانات ناقصة' });
 
-      const existing = await users.findOne({ username });
-      if (existing) return res.status(409).json({ message: 'اسم المستخدم موجود مسبقاً' });
+      const exists = await users.findOne({ username });
+      if (exists) return res.status(409).json({ message: 'اسم المستخدم مستخدم' });
 
-      const hashedPass = await bcrypt.hash(password, 10);
-      const newUser = {
-        username,
-        password: hashedPass,
-        role,
-        uploadCount: 0,
-        blocked: false,
-        createdAt: new Date()
-      };
-      await users.insertOne(newUser);
-      res.status(201).json({ message: 'تم إضافة المستخدم' });
+      const hashed = await bcrypt.hash(password, 10);
+      await users.insertOne({ username, password: hashed, role, uploadCount: 0, blocked: false, createdAt: new Date() });
+      res.status(201).json({ message: 'تم إنشاء المستخدم' });
     });
 
-    // جلب المستخدمين (مدير فقط)
+    // جلب المستخدمين
     app.get('/api/users', authMiddleware('manager'), async (req, res) => {
-      const allUsers = await users.find({ role: { $in: ['manager', 'supervisor'] } }, { projection: { password: 0 } }).toArray();
-      res.json(allUsers);
+      const all = await users.find({ role: { $in: ['manager', 'supervisor'] } }, { projection: { password: 0 } }).toArray();
+      res.json(all);
     });
 
-    // حذف مستخدم (مدير فقط)
-    app.delete('/api/users/:id', authMiddleware('manager'), async (req, res) => {
-      const id = req.params.id;
-      await users.deleteOne({ _id: new ObjectId(id) });
-      res.json({ message: 'تم حذف المستخدم' });
-    });
-
-    // حظر مستخدم (مدير فقط)
+    // حظر / إلغاء الحظر / حذف مستخدم
     app.post('/api/users/:id/block', authMiddleware('manager'), async (req, res) => {
-      const id = req.params.id;
-      await users.updateOne({ _id: new ObjectId(id) }, { $set: { blocked: true } });
-      res.json({ message: 'تم حظر المستخدم' });
+      await users.updateOne({ _id: new ObjectId(req.params.id) }, { $set: { blocked: true } });
+      res.json({ message: 'تم الحظر' });
     });
 
-    // فك الحظر عن مستخدم (مدير فقط)
     app.post('/api/users/:id/unblock', authMiddleware('manager'), async (req, res) => {
-      const id = req.params.id;
-      await users.updateOne({ _id: new ObjectId(id) }, { $set: { blocked: false } });
-      res.json({ message: 'تم فك الحظر عن المستخدم' });
+      await users.updateOne({ _id: new ObjectId(req.params.id) }, { $set: { blocked: false } });
+      res.json({ message: 'تم فك الحظر' });
     });
 
-    // Middleware فحص المستخدم المحظور لكل الطلبات
+    app.delete('/api/users/:id', authMiddleware('manager'), async (req, res) => {
+      await users.deleteOne({ _id: new ObjectId(req.params.id) });
+      res.json({ message: 'تم الحذف' });
+    });
+
+    // ميدلوير حظر المستخدم المحظور
     app.use(async (req, res, next) => {
       if (!req.headers.authorization) return next();
       try {
         const token = req.headers.authorization.split(' ')[1];
-        if (!token) return next();
         const payload = jwt.verify(token, JWT_SECRET);
         const user = await users.findOne({ _id: new ObjectId(payload.userId) });
-        if (user && user.blocked) return res.status(403).json({ message: 'حسابك محظور' });
+        if (user?.blocked) return res.status(403).json({ message: 'الحساب محظور' });
         next();
       } catch {
         next();
       }
     });
 
-    // إضافة لاعب جديد (مدير أو مشرف) مع رفع الصورة على Cloudinary
+    // إضافة لاعب
     app.post('/api/players', authMiddleware(), upload.single('image'), async (req, res) => {
       const { name, bio } = req.body;
       const username = req.user.username;
 
       if (!name || !bio || !req.file) {
-        return res.status(400).json({ message: 'الاسم، السيرة، والصورة مطلوبة' });
+        return res.status(400).json({ message: 'جميع الحقول مطلوبة' });
       }
 
       try {
-        const streamUpload = (fileBuffer) => {
-          return new Promise((resolve, reject) => {
-            const stream = cloudinary.uploader.upload_stream(
-              { folder: 'players' },
-              (error, result) => {
-                if (error) return reject(error);
-                resolve(result);
-              }
-            );
-            stream.end(fileBuffer);
+        const result = await new Promise((resolve, reject) => {
+          const stream = cloudinary.uploader.upload_stream({ folder: 'players' }, (err, result) => {
+            if (err) return reject(err);
+            resolve(result);
           });
-        };
-
-        const result = await streamUpload(req.file.buffer);
+          stream.end(req.file.buffer);
+        });
 
         const newPlayer = {
           name,
@@ -189,59 +168,54 @@ async function run() {
           views: 0,
           createdBy: username,
           createdAt: new Date(),
-          expireAt: new Date(Date.now() + 48 * 60 * 60 * 1000) // 48 ساعة صلاحية
+          expireAt: new Date(Date.now() + 48 * 60 * 60 * 1000)
         };
 
         await players.insertOne(newPlayer);
         await users.updateOne({ username }, { $inc: { uploadCount: 1 } });
 
-        res.status(201).json({ message: 'تمت إضافة اللاعب' });
+        res.status(201).json({ message: 'تمت الإضافة' });
       } catch (err) {
         console.error(err);
-        res.status(500).json({ message: 'خطأ في رفع الصورة أو إضافة اللاعب' });
+        res.status(500).json({ message: 'فشل رفع الصورة أو حفظ اللاعب' });
       }
     });
 
-    // حذف لاعب (مدير فقط)
+    // حذف لاعب
     app.delete('/api/players/:id', authMiddleware('manager'), async (req, res) => {
-      const id = req.params.id;
-      await players.deleteOne({ _id: new ObjectId(id) });
-      res.json({ message: 'تم حذف اللاعب' });
+      await players.deleteOne({ _id: new ObjectId(req.params.id) });
+      res.json({ message: 'تم الحذف' });
     });
 
-    // جلب اللاعبين غير منتهية الصلاحية
+    // جلب اللاعبين (غير منتهين فقط)
     app.get('/api/players', async (req, res) => {
       const now = new Date();
-      const all = await players.find({ expireAt: { $gt: now } }).sort({ createdAt: -1 }).toArray();
-      res.json(all);
+      const data = await players.find({ expireAt: { $gt: now } }).sort({ createdAt: -1 }).toArray();
+      res.json(data);
     });
 
-    // زيادة المشاهدات مرة واحدة لكل زائر
+    // زيادة مشاهدات
     app.post('/api/players/:id/view', async (req, res) => {
-      const id = req.params.id;
-      await players.updateOne({ _id: new ObjectId(id) }, { $inc: { views: 1 } });
-      res.json({ message: 'تمت زيادة المشاهدات' });
+      await players.updateOne({ _id: new ObjectId(req.params.id) }, { $inc: { views: 1 } });
+      res.json({ message: 'تمت الزيادة' });
     });
 
-    // زيادة المشاهدات بواسطة المدير (مفتاح خاص)
+    // زيادة مشاهدات عن طريق المدير بمفتاح سري
     app.post('/api/players/:id/admin-view', async (req, res) => {
-      const id = req.params.id;
-      const { adminKey } = req.body;
-
-      if (adminKey !== ADMIN_KEY) {
-        return res.status(403).json({ message: 'وصول غير مصرح' });
+      if (req.body.adminKey !== ADMIN_KEY) {
+        return res.status(403).json({ message: 'غير مصرح' });
       }
 
-      await players.updateOne({ _id: new ObjectId(id) }, { $inc: { views: 1 } });
-      res.json({ message: 'تمت زيادة المشاهدات بواسطة المدير' });
+      await players.updateOne({ _id: new ObjectId(req.params.id) }, { $inc: { views: 1 } });
+      res.json({ message: 'تمت الزيادة من المدير' });
     });
 
-    // حذف تلقائي للاعبين منتهية الصلاحية كل ساعة
+    // حذف اللاعبين المنتهين كل ساعة
     setInterval(async () => {
       const now = new Date();
-      const expired = await players.deleteMany({ expireAt: { $lt: now } });
-      if (expired.deletedCount > 0) {
-        console.log(`🗑️ تم حذف ${expired.deletedCount} لاعب منتهي الصلاحية`);
+      const deleted = await players.deleteMany({ expireAt: { $lt: now } });
+      if (deleted.deletedCount > 0) {
+        console.log(`🗑️ حذف ${deleted.deletedCount} لاعب منتهي`);
       }
     }, 3600000);
 
