@@ -8,7 +8,7 @@ const cloudinary = require('cloudinary').v2;
 require('dotenv').config();
 
 const app = express();
-const port = 4000;
+const port = process.env.PORT || 4000;  // دعم تشغيل على بيئات مختلفة
 const uri = process.env.MONGODB_URI;
 const JWT_SECRET = process.env.JWT_SECRET;
 const ADMIN_KEY = process.env.ADMIN_KEY;
@@ -20,11 +20,18 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-const client = new MongoClient(uri);
+// اسم موقعك على Netlify (لتعديل CORS)
+const allowedOrigins = ['https://alshorasports.netlify.app'];
 
-// ✅ السماح للواجهة الجديدة
 app.use(cors({
-  origin: 'https://clever-tiramisu-fcacb4.netlify.app',
+  origin: function (origin, callback) {
+    // السماح بالطلبات بدون origin (مثل أدوات الاختبار)
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true
 }));
 
@@ -53,6 +60,7 @@ function authMiddleware(role = null) {
 
 async function run() {
   try {
+    const client = new MongoClient(uri);
     await client.connect();
     console.log('✅ Connected to MongoDB');
 
@@ -60,6 +68,7 @@ async function run() {
     const users = db.collection('users');
     const players = db.collection('players');
 
+    // إنشاء مستخدم إداري تجريبي في حال عدم وجوده
     async function createTestUser() {
       const existing = await users.findOne({ username: 'admin' });
       if (existing) return;
@@ -72,6 +81,7 @@ async function run() {
         uploadCount: 0,
         createdAt: new Date()
       });
+      console.log('تم إنشاء مستخدم تجريبي admin');
     }
 
     await createTestUser();
@@ -122,6 +132,7 @@ async function run() {
       res.json({ message: 'تم الحذف' });
     });
 
+    // التحقق من حالة الحظر قبل معالجة الطلبات
     app.use(async (req, res, next) => {
       if (!req.headers.authorization) return next();
       try {
@@ -135,6 +146,7 @@ async function run() {
       }
     });
 
+    // إضافة لاعب مع رفع صورة إلى Cloudinary
     app.post('/api/players', authMiddleware(), upload.single('image'), async (req, res) => {
       const { name, bio } = req.body;
       const username = req.user.username;
@@ -159,7 +171,7 @@ async function run() {
           views: 0,
           createdBy: username,
           createdAt: new Date(),
-          expireAt: new Date(Date.now() + 48 * 60 * 60 * 1000)
+          expireAt: new Date(Date.now() + 48 * 60 * 60 * 1000) // حذف تلقائي بعد 48 ساعة
         };
 
         await players.insertOne(newPlayer);
@@ -183,11 +195,13 @@ async function run() {
       res.json(data);
     });
 
+    // زيادة مشاهدات لاعب عادي
     app.post('/api/players/:id/view', async (req, res) => {
       await players.updateOne({ _id: new ObjectId(req.params.id) }, { $inc: { views: 1 } });
       res.json({ message: 'تمت الزيادة' });
     });
 
+    // زيادة مشاهدات اللاعب بواسطة المدير (بمفتاح أمان)
     app.post('/api/players/:id/admin-view', async (req, res) => {
       if (req.body.adminKey !== ADMIN_KEY) {
         return res.status(403).json({ message: 'غير مصرح' });
@@ -196,6 +210,7 @@ async function run() {
       res.json({ message: 'تمت الزيادة من المدير' });
     });
 
+    // حذف اللاعبين المنتهين صلاحيتهم كل ساعة
     setInterval(async () => {
       const now = new Date();
       const deleted = await players.deleteMany({ expireAt: { $lt: now } });
@@ -209,7 +224,7 @@ async function run() {
     });
 
   } catch (error) {
-    console.error(error);
+    console.error('فشل تشغيل السيرفر:', error);
   }
 }
 
