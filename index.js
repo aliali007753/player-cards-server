@@ -22,15 +22,17 @@ cloudinary.config({
 
 const client = new MongoClient(uri);
 
-// ✅ تم تعديل هذا السطر للسماح بطلبات من موقع Netlify فقط
+// ✅ السماح بالموقعين Netlify
 app.use(cors({
-  origin: 'https://dainty-entremet-f77e64.netlify.app',
+  origin: [
+    'https://dainty-entremet-f77e64.netlify.app',
+    'https://clever-tiramisu-fcacb4.netlify.app'
+  ],
   credentials: true
 }));
 
 app.use(express.json());
 
-// استخدام multer لتخزين الصورة في الذاكرة مؤقتاً
 const storage = multer.memoryStorage();
 const upload = multer({ storage });
 
@@ -129,7 +131,7 @@ async function run() {
       res.json({ message: 'تم الحذف' });
     });
 
-    // ميدلوير حظر المستخدم المحظور
+    // حظر الحسابات من تنفيذ الطلبات
     app.use(async (req, res, next) => {
       if (!req.headers.authorization) return next();
       try {
@@ -181,31 +183,30 @@ async function run() {
       }
     });
 
-    // حذف لاعب
+    // ✅ حذف لاعب (للـ manager فقط)
     app.delete('/api/players/:id', authMiddleware('manager'), async (req, res) => {
       await players.deleteOne({ _id: new ObjectId(req.params.id) });
       res.json({ message: 'تم الحذف' });
     });
 
-    // جلب اللاعبين (غير منتهين فقط)
+    // جلب اللاعبين غير المنتهين
     app.get('/api/players', async (req, res) => {
       const now = new Date();
       const data = await players.find({ expireAt: { $gt: now } }).sort({ createdAt: -1 }).toArray();
       res.json(data);
     });
 
-    // زيادة مشاهدات
+    // زيادة مشاهدات عادية
     app.post('/api/players/:id/view', async (req, res) => {
       await players.updateOne({ _id: new ObjectId(req.params.id) }, { $inc: { views: 1 } });
       res.json({ message: 'تمت الزيادة' });
     });
 
-    // زيادة مشاهدات عن طريق المدير بمفتاح سري
+    // زيادة مشاهدات من المدير بمفتاح سري
     app.post('/api/players/:id/admin-view', async (req, res) => {
       if (req.body.adminKey !== ADMIN_KEY) {
         return res.status(403).json({ message: 'غير مصرح' });
       }
-
       await players.updateOne({ _id: new ObjectId(req.params.id) }, { $inc: { views: 1 } });
       res.json({ message: 'تمت الزيادة من المدير' });
     });
