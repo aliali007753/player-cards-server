@@ -22,12 +22,9 @@ cloudinary.config({
 
 const client = new MongoClient(uri);
 
-// ✅ السماح بالموقعين Netlify
+// ✅ السماح للواجهة الجديدة
 app.use(cors({
-  origin: [
-    'https://dainty-entremet-f77e64.netlify.app',
-    'https://clever-tiramisu-fcacb4.netlify.app'
-  ],
+  origin: 'https://clever-tiramisu-fcacb4.netlify.app',
   credentials: true
 }));
 
@@ -36,7 +33,6 @@ app.use(express.json());
 const storage = multer.memoryStorage();
 const upload = multer({ storage });
 
-// تحقق JWT وصلاحيات
 function authMiddleware(role = null) {
   return async (req, res, next) => {
     try {
@@ -64,7 +60,6 @@ async function run() {
     const users = db.collection('users');
     const players = db.collection('players');
 
-    // إنشاء مدير تجريبي
     async function createTestUser() {
       const existing = await users.findOne({ username: 'admin' });
       if (existing) return;
@@ -81,7 +76,6 @@ async function run() {
 
     await createTestUser();
 
-    // تسجيل الدخول
     app.post('/api/login', async (req, res) => {
       const { username, password } = req.body;
       const user = await users.findOne({ username });
@@ -96,7 +90,6 @@ async function run() {
       res.json({ token, role: user.role, username: user.username });
     });
 
-    // إضافة مستخدم جديد
     app.post('/api/users', authMiddleware('manager'), async (req, res) => {
       const { username, password, role } = req.body;
       if (!username || !password || !role) return res.status(400).json({ message: 'البيانات ناقصة' });
@@ -109,13 +102,11 @@ async function run() {
       res.status(201).json({ message: 'تم إنشاء المستخدم' });
     });
 
-    // جلب المستخدمين
     app.get('/api/users', authMiddleware('manager'), async (req, res) => {
       const all = await users.find({ role: { $in: ['manager', 'supervisor'] } }, { projection: { password: 0 } }).toArray();
       res.json(all);
     });
 
-    // حظر / إلغاء الحظر / حذف مستخدم
     app.post('/api/users/:id/block', authMiddleware('manager'), async (req, res) => {
       await users.updateOne({ _id: new ObjectId(req.params.id) }, { $set: { blocked: true } });
       res.json({ message: 'تم الحظر' });
@@ -131,7 +122,6 @@ async function run() {
       res.json({ message: 'تم الحذف' });
     });
 
-    // حظر الحسابات من تنفيذ الطلبات
     app.use(async (req, res, next) => {
       if (!req.headers.authorization) return next();
       try {
@@ -145,7 +135,6 @@ async function run() {
       }
     });
 
-    // إضافة لاعب
     app.post('/api/players', authMiddleware(), upload.single('image'), async (req, res) => {
       const { name, bio } = req.body;
       const username = req.user.username;
@@ -183,26 +172,22 @@ async function run() {
       }
     });
 
-    // ✅ حذف لاعب (للـ manager فقط)
     app.delete('/api/players/:id', authMiddleware('manager'), async (req, res) => {
       await players.deleteOne({ _id: new ObjectId(req.params.id) });
       res.json({ message: 'تم الحذف' });
     });
 
-    // جلب اللاعبين غير المنتهين
     app.get('/api/players', async (req, res) => {
       const now = new Date();
       const data = await players.find({ expireAt: { $gt: now } }).sort({ createdAt: -1 }).toArray();
       res.json(data);
     });
 
-    // زيادة مشاهدات عادية
     app.post('/api/players/:id/view', async (req, res) => {
       await players.updateOne({ _id: new ObjectId(req.params.id) }, { $inc: { views: 1 } });
       res.json({ message: 'تمت الزيادة' });
     });
 
-    // زيادة مشاهدات من المدير بمفتاح سري
     app.post('/api/players/:id/admin-view', async (req, res) => {
       if (req.body.adminKey !== ADMIN_KEY) {
         return res.status(403).json({ message: 'غير مصرح' });
@@ -211,7 +196,6 @@ async function run() {
       res.json({ message: 'تمت الزيادة من المدير' });
     });
 
-    // حذف اللاعبين المنتهين كل ساعة
     setInterval(async () => {
       const now = new Date();
       const deleted = await players.deleteMany({ expireAt: { $lt: now } });
