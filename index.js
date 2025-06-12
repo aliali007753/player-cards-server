@@ -63,9 +63,9 @@ async function run() {
   const players = db.collection('players');
   const votes = db.collection('votes');
   const voteSessions = db.collection('vote_sessions');
-  const voteEndTime = db.collection('vote_end_time');
+  const voteEnd = db.collection('vote_end_time');
 
-  // ==== إنشاء مدير افتراضي ====
+  // ==== إنشاء حساب مدير افتراضي ====
   const existing = await users.findOne({ username: 'admin' });
   if (!existing) {
     const hashed = await bcrypt.hash('admin123', 10);
@@ -92,8 +92,7 @@ async function run() {
 
       const token = jwt.sign({ userId: user._id, username, role: user.role }, JWT_SECRET, { expiresIn: '8h' });
       res.json({ token, role: user.role, username });
-    } catch (err) {
-      console.error('Login error:', err);
+    } catch {
       res.status(500).json({ message: 'خطأ في تسجيل الدخول' });
     }
   });
@@ -127,8 +126,7 @@ async function run() {
       await users.updateOne({ username }, { $inc: { uploadCount: 1 } });
 
       res.status(201).json({ message: 'تمت الإضافة' });
-    } catch (err) {
-      console.error('Add player error:', err);
+    } catch {
       res.status(500).json({ message: 'فشل رفع الصورة أو حفظ البيانات' });
     }
   });
@@ -139,8 +137,7 @@ async function run() {
       const now = new Date();
       const result = await players.find({ expireAt: { $gt: now } }).sort({ createdAt: -1 }).toArray();
       res.json(result);
-    } catch (err) {
-      console.error('Fetch players error:', err);
+    } catch {
       res.status(500).json({ message: 'خطأ في جلب اللاعبين' });
     }
   });
@@ -156,7 +153,7 @@ async function run() {
     }
   });
 
-  // ==== التصويت: إضافة لاعب ====
+  // ==== التصويت: إضافة لاعب إلى التصويت ====
   app.post('/api/vote/add/:id', authMiddleware('manager'), async (req, res) => {
     try {
       const playerId = new ObjectId(req.params.id);
@@ -173,7 +170,7 @@ async function run() {
     }
   });
 
-  // ==== عرض التصويت ====
+  // ==== عرض قائمة التصويت ====
   app.get('/api/vote', async (req, res) => {
     try {
       const list = await votes.find().toArray();
@@ -182,8 +179,7 @@ async function run() {
         return { ...p, voteCount: v.votes };
       }));
       res.json(result);
-    } catch (err) {
-      console.error('Fetch vote error:', err);
+    } catch {
       res.status(500).json({ message: 'خطأ في جلب التصويت' });
     }
   });
@@ -218,7 +214,7 @@ async function run() {
     }
   });
 
-  // ==== زيادة صوت يدوي ====
+  // ==== زيادة التصويت يدويًا ====
   app.post('/api/vote/admin/:id', authMiddleware('manager'), async (req, res) => {
     try {
       const playerId = new ObjectId(req.params.id);
@@ -229,33 +225,33 @@ async function run() {
     }
   });
 
-  // ==== بدء التصويت ====
+  // ==== ✅ بدء التصويت وتحديد وقت النهاية مع طباعة الخطأ ====
   app.post('/api/vote/start', authMiddleware('manager'), async (req, res) => {
     try {
       const endDate = new Date(Date.now() + 24 * 60 * 60 * 1000);
-      await voteEndTime.updateOne(
+      await voteEnd.updateOne(
         { _id: 'vote_end' },
         { $set: { endTime: endDate } },
         { upsert: true }
       );
-      res.json({ message: '✅ تم بدء التصويت', endTime: endDate });
+      res.json({ message: 'تم بدء التصويت' });
     } catch (err) {
-      console.error('Start vote error:', err);
-      res.status(500).json({ message: 'خطأ في بدء التصويت' });
+      console.error('خطأ في /api/vote/start:', err); // 🔍 هنا تطبع الخطأ في الكونسول
+      res.status(500).json({ message: 'خطأ في التصويت' });
     }
   });
 
   // ==== جلب وقت انتهاء التصويت ====
   app.get('/api/vote/endtime', async (req, res) => {
     try {
-      const doc = await voteEndTime.findOne({ _id: 'vote_end' });
+      const doc = await voteEnd.findOne({ _id: 'vote_end' });
       res.json({ endTime: doc?.endTime || null });
     } catch {
       res.status(500).json({ message: 'خطأ في جلب وقت انتهاء التصويت' });
     }
   });
 
-  // ==== تشغيل السيرفر ====
+  // ==== بدء السيرفر ====
   app.listen(port, () => {
     console.log(`🚀 Server running on port ${port}`);
   });
