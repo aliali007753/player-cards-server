@@ -63,8 +63,9 @@ async function run() {
   const players = db.collection('players');
   const votes = db.collection('votes');
   const voteSessions = db.collection('vote_sessions');
+  const voteEndTime = db.collection('vote_end_time');
 
-  // ==== إنشاء حساب مدير افتراضي ====
+  // ==== إنشاء مدير افتراضي ====
   const existing = await users.findOne({ username: 'admin' });
   if (!existing) {
     const hashed = await bcrypt.hash('admin123', 10);
@@ -91,7 +92,8 @@ async function run() {
 
       const token = jwt.sign({ userId: user._id, username, role: user.role }, JWT_SECRET, { expiresIn: '8h' });
       res.json({ token, role: user.role, username });
-    } catch {
+    } catch (err) {
+      console.error('Login error:', err);
       res.status(500).json({ message: 'خطأ في تسجيل الدخول' });
     }
   });
@@ -125,7 +127,8 @@ async function run() {
       await users.updateOne({ username }, { $inc: { uploadCount: 1 } });
 
       res.status(201).json({ message: 'تمت الإضافة' });
-    } catch {
+    } catch (err) {
+      console.error('Add player error:', err);
       res.status(500).json({ message: 'فشل رفع الصورة أو حفظ البيانات' });
     }
   });
@@ -136,7 +139,8 @@ async function run() {
       const now = new Date();
       const result = await players.find({ expireAt: { $gt: now } }).sort({ createdAt: -1 }).toArray();
       res.json(result);
-    } catch {
+    } catch (err) {
+      console.error('Fetch players error:', err);
       res.status(500).json({ message: 'خطأ في جلب اللاعبين' });
     }
   });
@@ -152,7 +156,7 @@ async function run() {
     }
   });
 
-  // ==== التصويت: إضافة لاعب إلى التصويت ====
+  // ==== التصويت: إضافة لاعب ====
   app.post('/api/vote/add/:id', authMiddleware('manager'), async (req, res) => {
     try {
       const playerId = new ObjectId(req.params.id);
@@ -169,7 +173,7 @@ async function run() {
     }
   });
 
-  // ==== عرض قائمة التصويت ====
+  // ==== عرض التصويت ====
   app.get('/api/vote', async (req, res) => {
     try {
       const list = await votes.find().toArray();
@@ -178,7 +182,8 @@ async function run() {
         return { ...p, voteCount: v.votes };
       }));
       res.json(result);
-    } catch {
+    } catch (err) {
+      console.error('Fetch vote error:', err);
       res.status(500).json({ message: 'خطأ في جلب التصويت' });
     }
   });
@@ -213,7 +218,7 @@ async function run() {
     }
   });
 
-  // ==== زيادة التصويت يدويًا ====
+  // ==== زيادة صوت يدوي ====
   app.post('/api/vote/admin/:id', authMiddleware('manager'), async (req, res) => {
     try {
       const playerId = new ObjectId(req.params.id);
@@ -224,17 +229,18 @@ async function run() {
     }
   });
 
-  // ==== بدء التصويت وتحديد وقت النهاية ====
+  // ==== بدء التصويت ====
   app.post('/api/vote/start', authMiddleware('manager'), async (req, res) => {
     try {
-      const endDate = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 ساعة
-      await db.collection('vote_end_time').updateOne(
+      const endDate = new Date(Date.now() + 24 * 60 * 60 * 1000);
+      await voteEndTime.updateOne(
         { _id: 'vote_end' },
         { $set: { endTime: endDate } },
         { upsert: true }
       );
-      res.json({ message: 'تم بدء التصويت' });
-    } catch {
+      res.json({ message: '✅ تم بدء التصويت', endTime: endDate });
+    } catch (err) {
+      console.error('Start vote error:', err);
       res.status(500).json({ message: 'خطأ في بدء التصويت' });
     }
   });
@@ -242,14 +248,14 @@ async function run() {
   // ==== جلب وقت انتهاء التصويت ====
   app.get('/api/vote/endtime', async (req, res) => {
     try {
-      const doc = await db.collection('vote_end_time').findOne({ _id: 'vote_end' });
+      const doc = await voteEndTime.findOne({ _id: 'vote_end' });
       res.json({ endTime: doc?.endTime || null });
     } catch {
       res.status(500).json({ message: 'خطأ في جلب وقت انتهاء التصويت' });
     }
   });
 
-  // ==== بدء السيرفر ====
+  // ==== تشغيل السيرفر ====
   app.listen(port, () => {
     console.log(`🚀 Server running on port ${port}`);
   });
