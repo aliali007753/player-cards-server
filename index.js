@@ -63,7 +63,7 @@ async function run() {
   const players = db.collection('players');
   const votes = db.collection('votes');
   const voteSessions = db.collection('vote_sessions');
-  const voteEnd = db.collection('vote_end_time');
+  const voteEndTime = db.collection('vote_end_time');
 
   // ==== إنشاء حساب مدير افتراضي ====
   const existing = await users.findOne({ username: 'admin' });
@@ -92,7 +92,8 @@ async function run() {
 
       const token = jwt.sign({ userId: user._id, username, role: user.role }, JWT_SECRET, { expiresIn: '8h' });
       res.json({ token, role: user.role, username });
-    } catch {
+    } catch (error) {
+      console.error('خطأ في تسجيل الدخول:', error);
       res.status(500).json({ message: 'خطأ في تسجيل الدخول' });
     }
   });
@@ -126,7 +127,8 @@ async function run() {
       await users.updateOne({ username }, { $inc: { uploadCount: 1 } });
 
       res.status(201).json({ message: 'تمت الإضافة' });
-    } catch {
+    } catch (error) {
+      console.error('خطأ في رفع الصورة:', error);
       res.status(500).json({ message: 'فشل رفع الصورة أو حفظ البيانات' });
     }
   });
@@ -137,7 +139,8 @@ async function run() {
       const now = new Date();
       const result = await players.find({ expireAt: { $gt: now } }).sort({ createdAt: -1 }).toArray();
       res.json(result);
-    } catch {
+    } catch (error) {
+      console.error('خطأ في جلب اللاعبين:', error);
       res.status(500).json({ message: 'خطأ في جلب اللاعبين' });
     }
   });
@@ -148,7 +151,8 @@ async function run() {
       const playerId = new ObjectId(req.params.id);
       await players.updateOne({ _id: playerId }, { $inc: { views: 1 } });
       res.json({ message: 'تمت الزيادة' });
-    } catch {
+    } catch (error) {
+      console.error('خطأ في زيادة المشاهدات:', error);
       res.status(500).json({ message: 'خطأ في زيادة المشاهدات' });
     }
   });
@@ -165,7 +169,8 @@ async function run() {
 
       await votes.insertOne({ playerId, votes: 0 });
       res.json({ message: 'تمت الإضافة إلى التصويت' });
-    } catch {
+    } catch (error) {
+      console.error('خطأ في إضافة التصويت:', error);
       res.status(500).json({ message: 'خطأ في إضافة التصويت' });
     }
   });
@@ -179,7 +184,8 @@ async function run() {
         return { ...p, voteCount: v.votes };
       }));
       res.json(result);
-    } catch {
+    } catch (error) {
+      console.error('خطأ في جلب التصويت:', error);
       res.status(500).json({ message: 'خطأ في جلب التصويت' });
     }
   });
@@ -197,7 +203,8 @@ async function run() {
       await voteSessions.insertOne({ playerId, ip, votedAt: new Date() });
 
       res.json({ message: '✅ تم التصويت' });
-    } catch {
+    } catch (error) {
+      console.error('خطأ في التصويت:', error);
       res.status(500).json({ message: 'خطأ في التصويت' });
     }
   });
@@ -209,7 +216,8 @@ async function run() {
       await votes.deleteOne({ playerId });
       await voteSessions.deleteMany({ playerId });
       res.json({ message: 'تم الحذف من التصويت' });
-    } catch {
+    } catch (error) {
+      console.error('خطأ في حذف التصويت:', error);
       res.status(500).json({ message: 'خطأ في حذف التصويت' });
     }
   });
@@ -220,33 +228,36 @@ async function run() {
       const playerId = new ObjectId(req.params.id);
       await votes.updateOne({ playerId }, { $inc: { votes: 1 } });
       res.json({ message: 'تمت الزيادة اليدوية' });
-    } catch {
+    } catch (error) {
+      console.error('خطأ في الزيادة اليدوية:', error);
       res.status(500).json({ message: 'خطأ في الزيادة اليدوية' });
     }
   });
 
-  // ==== ✅ بدء التصويت وتحديد وقت النهاية مع طباعة الخطأ ====
+  // ==== بدء التصويت ====
   app.post('/api/vote/start', authMiddleware('manager'), async (req, res) => {
     try {
-      const endDate = new Date(Date.now() + 24 * 60 * 60 * 1000);
-      await voteEnd.updateOne(
+      const endDate = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 ساعة
+      await voteEndTime.updateOne(
         { _id: 'vote_end' },
         { $set: { endTime: endDate } },
         { upsert: true }
       );
+      console.log('✅ التصويت يبدأ الآن وينتهي عند:', endDate.toISOString());
       res.json({ message: 'تم بدء التصويت' });
-    } catch (err) {
-      console.error('خطأ في /api/vote/start:', err); // 🔍 هنا تطبع الخطأ في الكونسول
-      res.status(500).json({ message: 'خطأ في التصويت' });
+    } catch (error) {
+      console.error('خطأ في بدء التصويت:', error);
+      res.status(500).json({ message: 'خطأ في بدء التصويت' });
     }
   });
 
   // ==== جلب وقت انتهاء التصويت ====
   app.get('/api/vote/endtime', async (req, res) => {
     try {
-      const doc = await voteEnd.findOne({ _id: 'vote_end' });
+      const doc = await voteEndTime.findOne({ _id: 'vote_end' });
       res.json({ endTime: doc?.endTime || null });
-    } catch {
+    } catch (error) {
+      console.error('خطأ في جلب وقت انتهاء التصويت:', error);
       res.status(500).json({ message: 'خطأ في جلب وقت انتهاء التصويت' });
     }
   });
