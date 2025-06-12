@@ -31,6 +31,13 @@ app.use(express.json());
 const storage = multer.memoryStorage();
 const upload = multer({ storage });
 
+// ===== دالة تحقق من صحة ObjectId =====
+function isValidObjectId(id) {
+  if (!id) return false;
+  if (typeof id !== 'string') return false;
+  return ObjectId.isValid(id) && String(new ObjectId(id)) === id;
+}
+
 // ====== التحقق من التوكن ======
 function authMiddleware(role = null) {
   return async (req, res, next) => {
@@ -145,7 +152,12 @@ async function run() {
   // ====== مشاهدة اللاعب ======
   app.post('/api/players/:id/view', async (req, res) => {
     try {
-      const playerId = new ObjectId(req.params.id);
+      const id = req.params.id;
+      console.log('View player ID:', id);
+      if (!isValidObjectId(id)) {
+        return res.status(400).json({ message: 'معرف اللاعب غير صالح' });
+      }
+      const playerId = new ObjectId(id);
       await players.updateOne({ _id: playerId }, { $inc: { views: 1 } });
       res.json({ message: 'تمت الزيادة' });
     } catch (err) {
@@ -157,7 +169,13 @@ async function run() {
   // ====== إضافة للتصويت ======
   app.post('/api/vote/add/:id', authMiddleware('manager'), async (req, res) => {
     try {
-      const playerId = new ObjectId(req.params.id);
+      const id = req.params.id;
+      console.log('Add to vote ID:', id);
+      if (!isValidObjectId(id)) {
+        return res.status(400).json({ message: 'معرف اللاعب غير صالح' });
+      }
+      const playerId = new ObjectId(id);
+
       const player = await players.findOne({ _id: playerId });
       if (!player) return res.status(404).json({ message: 'اللاعب غير موجود' });
 
@@ -190,7 +208,13 @@ async function run() {
   // ====== التصويت للزوار ======
   app.post('/api/vote/:id', async (req, res) => {
     try {
-      const playerId = new ObjectId(req.params.id);
+      const id = req.params.id;
+      console.log('Vote player ID:', id);
+      if (!isValidObjectId(id)) {
+        return res.status(400).json({ message: 'معرف اللاعب غير صالح' });
+      }
+      const playerId = new ObjectId(id);
+
       const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
       const existingVote = await voteSessions.findOne({ playerId, ip });
       if (existingVote) return res.status(400).json({ message: 'لقد صوتت مسبقًا' });
