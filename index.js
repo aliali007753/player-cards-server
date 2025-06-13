@@ -1,3 +1,4 @@
+// ==== المتطلبات الأساسية ====
 const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
@@ -31,7 +32,7 @@ app.use(express.json());
 const storage = multer.memoryStorage();
 const upload = multer({ storage });
 
-// ====== التحقق من التوكن ======
+// ==== التوكن للتحقق ====
 function authMiddleware(role = null) {
   return async (req, res, next) => {
     try {
@@ -44,7 +45,7 @@ function authMiddleware(role = null) {
       }
       next();
     } catch (err) {
-      console.error('🟥 Auth error:', err.message);
+      console.error('🟥 Auth Error:', err.message);
       res.status(401).json({ message: 'توكن غير صالح' });
     }
   };
@@ -62,7 +63,6 @@ async function run() {
   const voteSessions = db.collection('vote_sessions');
   const voteEnd = db.collection('vote_end_time');
 
-  // ====== مدير افتراضي ======
   const existing = await users.findOne({ username: 'admin' });
   if (!existing) {
     const hashed = await bcrypt.hash('admin123', 10);
@@ -74,10 +74,10 @@ async function run() {
       uploadCount: 0,
       createdAt: new Date()
     });
-    console.log('🧪 مدير افتراضي تم إنشاؤه');
+    console.log('🧪 تم إنشاء مدير افتراضي');
   }
 
-  // ====== تسجيل الدخول ======
+  // ==== تسجيل الدخول ====
   app.post('/api/login', async (req, res) => {
     try {
       const { username, password } = req.body;
@@ -89,13 +89,40 @@ async function run() {
 
       const token = jwt.sign({ userId: user._id, username, role: user.role }, JWT_SECRET, { expiresIn: '8h' });
       res.json({ token, role: user.role, username });
-    } catch (err) {
-      console.error('🟥 Login error:', err.message);
+    } catch {
       res.status(500).json({ message: 'خطأ في تسجيل الدخول' });
     }
   });
 
-  // ====== إضافة لاعب ======
+  // ==== بدء التصويت وتحديد وقت النهاية ====
+  app.post('/api/vote/start', authMiddleware('manager'), async (req, res) => {
+    try {
+      const endDate = new Date(Date.now() + 24 * 60 * 60 * 1000);
+      const result = await voteEnd.updateOne(
+        { _id: 'vote_end' },
+        { $set: { endTime: endDate } },
+        { upsert: true }
+      );
+      console.log('✅ التصويت بدأ بنجاح', result);
+      res.json({ message: '✅ تم بدء التصويت بنجاح' });
+    } catch (err) {
+      console.error('🟥 Start vote error:', err.message);
+      res.status(500).json({ message: 'خطأ في بدء التصويت', error: err.message });
+    }
+  });
+
+  // ==== جلب وقت انتهاء التصويت ====
+  app.get('/api/vote/endtime', async (req, res) => {
+    try {
+      const doc = await voteEnd.findOne({ _id: 'vote_end' });
+      res.json({ endTime: doc?.endTime || null });
+    } catch (err) {
+      console.error('🟥 End time fetch error:', err.message);
+      res.status(500).json({ message: 'خطأ في جلب وقت انتهاء التصويت' });
+    }
+  });
+
+  // ==== إضافة لاعب مع صورة ====
   app.post('/api/players', authMiddleware(), upload.single('image'), async (req, res) => {
     try {
       const { name, bio } = req.body;
@@ -126,35 +153,33 @@ async function run() {
       res.status(201).json({ message: 'تمت الإضافة' });
     } catch (err) {
       console.error('🟥 Add player error:', err.message);
-      res.status(500).json({ message: 'فشل في الإضافة' });
+      res.status(500).json({ message: 'فشل رفع الصورة أو حفظ البيانات' });
     }
   });
 
-  // ====== جلب اللاعبين ======
+  // ==== عرض اللاعبين ====
   app.get('/api/players', async (req, res) => {
     try {
       const now = new Date();
       const result = await players.find({ expireAt: { $gt: now } }).sort({ createdAt: -1 }).toArray();
       res.json(result);
     } catch (err) {
-      console.error('🟥 Fetch players error:', err.message);
       res.status(500).json({ message: 'خطأ في جلب اللاعبين' });
     }
   });
 
-  // ====== مشاهدة اللاعب ======
+  // ==== زيادة المشاهدات ====
   app.post('/api/players/:id/view', async (req, res) => {
     try {
       const playerId = new ObjectId(req.params.id);
       await players.updateOne({ _id: playerId }, { $inc: { views: 1 } });
       res.json({ message: 'تمت الزيادة' });
-    } catch (err) {
-      console.error('🟥 View error:', err.message);
+    } catch {
       res.status(500).json({ message: 'خطأ في زيادة المشاهدات' });
     }
   });
 
-  // ====== إضافة للتصويت ======
+  // ==== التصويت: إضافة لاعب إلى التصويت ====
   app.post('/api/vote/add/:id', authMiddleware('manager'), async (req, res) => {
     try {
       const playerId = new ObjectId(req.params.id);
@@ -166,13 +191,12 @@ async function run() {
 
       await votes.insertOne({ playerId, votes: 0 });
       res.json({ message: 'تمت الإضافة إلى التصويت' });
-    } catch (err) {
-      console.error('🟥 Add to vote error:', err.message);
-      res.status(500).json({ message: 'خطأ في الإضافة للتصويت' });
+    } catch {
+      res.status(500).json({ message: 'خطأ في إضافة التصويت' });
     }
   });
 
-  // ====== جلب قائمة التصويت ======
+  // ==== عرض قائمة التصويت ====
   app.get('/api/vote', async (req, res) => {
     try {
       const list = await votes.find().toArray();
@@ -181,19 +205,19 @@ async function run() {
         return { ...p, voteCount: v.votes };
       }));
       res.json(result);
-    } catch (err) {
-      console.error('🟥 Get vote list error:', err.message);
+    } catch {
       res.status(500).json({ message: 'خطأ في جلب التصويت' });
     }
   });
 
-  // ====== التصويت للزوار ======
+  // ==== التصويت من الزائر ====
   app.post('/api/vote/:id', async (req, res) => {
     try {
       const playerId = new ObjectId(req.params.id);
       const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+
       const existingVote = await voteSessions.findOne({ playerId, ip });
-      if (existingVote) return res.status(400).json({ message: 'لقد صوتت مسبقًا' });
+      if (existingVote) return res.status(400).json({ message: 'صوتت مسبقًا' });
 
       await votes.updateOne({ playerId }, { $inc: { votes: 1 } });
       await voteSessions.insertOne({ playerId, ip, votedAt: new Date() });
@@ -205,40 +229,33 @@ async function run() {
     }
   });
 
-  // ====== بدء التصويت ======
-  app.post('/api/vote/start', authMiddleware('manager'), async (req, res) => {
+  // ==== زيادة التصويت يدويًا ====
+  app.post('/api/vote/admin/:id', authMiddleware('manager'), async (req, res) => {
     try {
-      const endDate = new Date(Date.now() + 24 * 60 * 60 * 1000);
-      const result = await voteEnd.updateOne(
-        { _id: 'vote_end' },
-        { $set: { endTime: endDate } },
-        { upsert: true }
-      );
-      if (!result.acknowledged) throw new Error("لم يتم حفظ وقت النهاية");
-      res.json({ message: '✅ تم بدء التصويت بنجاح' });
-    } catch (err) {
-      console.error('🟥 Start vote error:', err.message);
-      res.status(500).json({ message: 'خطأ في بدء التصويت', error: err.message });
+      const playerId = new ObjectId(req.params.id);
+      await votes.updateOne({ playerId }, { $inc: { votes: 1 } });
+      res.json({ message: 'تمت الزيادة اليدوية' });
+    } catch {
+      res.status(500).json({ message: 'خطأ في الزيادة اليدوية' });
     }
   });
 
-  // ====== وقت نهاية التصويت ======
-  app.get('/api/vote/endtime', async (req, res) => {
+  // ==== حذف لاعب من التصويت ====
+  app.delete('/api/vote/:id', authMiddleware('manager'), async (req, res) => {
     try {
-      const doc = await voteEnd.findOne({ _id: 'vote_end' });
-      res.json({ endTime: doc?.endTime || null });
-    } catch (err) {
-      console.error('🟥 Get vote end time error:', err.message);
-      res.status(500).json({ message: 'خطأ في جلب وقت النهاية' });
+      const playerId = new ObjectId(req.params.id);
+      await votes.deleteOne({ playerId });
+      await voteSessions.deleteMany({ playerId });
+      res.json({ message: 'تم الحذف من التصويت' });
+    } catch {
+      res.status(500).json({ message: 'خطأ في حذف التصويت' });
     }
   });
 
-  // ====== بدء السيرفر ======
+  // ==== تشغيل الخادم ====
   app.listen(port, () => {
     console.log(`🚀 Server running on port ${port}`);
   });
 }
 
-run().catch(err => {
-  console.error('🟥 MongoDB Connection Error:', err.message);
-});
+run().catch(console.dir);
