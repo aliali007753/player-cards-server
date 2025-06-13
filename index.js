@@ -1,4 +1,3 @@
-// ==== المتطلبات الأساسية ====
 const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
@@ -19,22 +18,17 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-const allowedOrigins = ['https://alshorasports.netlify.app'];
 app.use(cors({
-  origin: function (origin, callback) {
-    if (!origin || allowedOrigins.includes(origin)) callback(null, true);
-    else callback(new Error('Not allowed by CORS'));
-  },
+  origin: ['https://alshorasports.netlify.app'],
   credentials: true
 }));
-
 app.use(express.json());
+
 const storage = multer.memoryStorage();
 const upload = multer({ storage });
 
-// ==== التوكن للتحقق ====
 function authMiddleware(role = null) {
-  return async (req, res, next) => {
+  return (req, res, next) => {
     try {
       const token = req.headers.authorization?.split(' ')[1];
       if (!token) return res.status(401).json({ message: 'غير مصرح' });
@@ -45,7 +39,7 @@ function authMiddleware(role = null) {
       }
       next();
     } catch (err) {
-      console.error('🟥 Auth Error:', err.message);
+      console.error('JWT Error:', err);
       res.status(401).json({ message: 'توكن غير صالح' });
     }
   };
@@ -61,8 +55,9 @@ async function run() {
   const players = db.collection('players');
   const votes = db.collection('votes');
   const voteSessions = db.collection('vote_sessions');
-  const voteEnd = db.collection('vote_end_time');
+  const voteEndTime = db.collection('vote_end_time');
 
+  // مدير افتراضي
   const existing = await users.findOne({ username: 'admin' });
   if (!existing) {
     const hashed = await bcrypt.hash('admin123', 10);
@@ -77,7 +72,6 @@ async function run() {
     console.log('🧪 تم إنشاء مدير افتراضي');
   }
 
-  // ==== تسجيل الدخول ====
   app.post('/api/login', async (req, res) => {
     try {
       const { username, password } = req.body;
@@ -89,40 +83,12 @@ async function run() {
 
       const token = jwt.sign({ userId: user._id, username, role: user.role }, JWT_SECRET, { expiresIn: '8h' });
       res.json({ token, role: user.role, username });
-    } catch {
+    } catch (err) {
+      console.error(err);
       res.status(500).json({ message: 'خطأ في تسجيل الدخول' });
     }
   });
 
-  // ==== بدء التصويت وتحديد وقت النهاية ====
-  app.post('/api/vote/start', authMiddleware('manager'), async (req, res) => {
-    try {
-      const endDate = new Date(Date.now() + 24 * 60 * 60 * 1000);
-      const result = await voteEnd.updateOne(
-        { _id: 'vote_end' },
-        { $set: { endTime: endDate } },
-        { upsert: true }
-      );
-      console.log('✅ التصويت بدأ بنجاح', result);
-      res.json({ message: '✅ تم بدء التصويت بنجاح' });
-    } catch (err) {
-      console.error('🟥 Start vote error:', err.message);
-      res.status(500).json({ message: 'خطأ في بدء التصويت', error: err.message });
-    }
-  });
-
-  // ==== جلب وقت انتهاء التصويت ====
-  app.get('/api/vote/endtime', async (req, res) => {
-    try {
-      const doc = await voteEnd.findOne({ _id: 'vote_end' });
-      res.json({ endTime: doc?.endTime || null });
-    } catch (err) {
-      console.error('🟥 End time fetch error:', err.message);
-      res.status(500).json({ message: 'خطأ في جلب وقت انتهاء التصويت' });
-    }
-  });
-
-  // ==== إضافة لاعب مع صورة ====
   app.post('/api/players', authMiddleware(), upload.single('image'), async (req, res) => {
     try {
       const { name, bio } = req.body;
@@ -149,37 +115,69 @@ async function run() {
 
       await players.insertOne(player);
       await users.updateOne({ username }, { $inc: { uploadCount: 1 } });
-
       res.status(201).json({ message: 'تمت الإضافة' });
     } catch (err) {
-      console.error('🟥 Add player error:', err.message);
+      console.error('Add Player Error:', err);
       res.status(500).json({ message: 'فشل رفع الصورة أو حفظ البيانات' });
     }
   });
 
-  // ==== عرض اللاعبين ====
   app.get('/api/players', async (req, res) => {
     try {
       const now = new Date();
       const result = await players.find({ expireAt: { $gt: now } }).sort({ createdAt: -1 }).toArray();
       res.json(result);
     } catch (err) {
+      console.error(err);
       res.status(500).json({ message: 'خطأ في جلب اللاعبين' });
     }
   });
 
-  // ==== زيادة المشاهدات ====
   app.post('/api/players/:id/view', async (req, res) => {
     try {
       const playerId = new ObjectId(req.params.id);
       await players.updateOne({ _id: playerId }, { $inc: { views: 1 } });
       res.json({ message: 'تمت الزيادة' });
-    } catch {
+    } catch (err) {
+      console.error(err);
       res.status(500).json({ message: 'خطأ في زيادة المشاهدات' });
     }
   });
 
-  // ==== التصويت: إضافة لاعب إلى التصويت ====
+  app.post('/api/players/:id/admin-view', authMiddleware('manager'), async (req, res) => {
+    try {
+      const playerId = new ObjectId(req.params.id);
+      await players.updateOne({ _id: playerId }, { $inc: { views: 1 } });
+      res.json({ message: 'تمت الزيادة الإدارية' });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ message: 'خطأ في الزيادة الإدارية' });
+    }
+  });
+
+  app.delete('/api/players/:id', authMiddleware('manager'), async (req, res) => {
+    try {
+      const playerId = new ObjectId(req.params.id);
+      await players.deleteOne({ _id: playerId });
+      await votes.deleteOne({ playerId });
+      await voteSessions.deleteMany({ playerId });
+      res.json({ message: 'تم حذف اللاعب' });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ message: 'فشل في حذف اللاعب' });
+    }
+  });
+
+  app.get('/api/users', authMiddleware('manager'), async (req, res) => {
+    try {
+      const result = await users.find().toArray();
+      res.json(result);
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ message: 'فشل في تحميل المستخدمين' });
+    }
+  });
+
   app.post('/api/vote/add/:id', authMiddleware('manager'), async (req, res) => {
     try {
       const playerId = new ObjectId(req.params.id);
@@ -191,12 +189,12 @@ async function run() {
 
       await votes.insertOne({ playerId, votes: 0 });
       res.json({ message: 'تمت الإضافة إلى التصويت' });
-    } catch {
+    } catch (err) {
+      console.error(err);
       res.status(500).json({ message: 'خطأ في إضافة التصويت' });
     }
   });
 
-  // ==== عرض قائمة التصويت ====
   app.get('/api/vote', async (req, res) => {
     try {
       const list = await votes.find().toArray();
@@ -205,12 +203,12 @@ async function run() {
         return { ...p, voteCount: v.votes };
       }));
       res.json(result);
-    } catch {
+    } catch (err) {
+      console.error(err);
       res.status(500).json({ message: 'خطأ في جلب التصويت' });
     }
   });
 
-  // ==== التصويت من الزائر ====
   app.post('/api/vote/:id', async (req, res) => {
     try {
       const playerId = new ObjectId(req.params.id);
@@ -224,35 +222,59 @@ async function run() {
 
       res.json({ message: '✅ تم التصويت' });
     } catch (err) {
-      console.error('🟥 Vote error:', err.message);
+      console.error(err);
       res.status(500).json({ message: 'خطأ في التصويت' });
     }
   });
 
-  // ==== زيادة التصويت يدويًا ====
   app.post('/api/vote/admin/:id', authMiddleware('manager'), async (req, res) => {
     try {
       const playerId = new ObjectId(req.params.id);
       await votes.updateOne({ playerId }, { $inc: { votes: 1 } });
       res.json({ message: 'تمت الزيادة اليدوية' });
-    } catch {
+    } catch (err) {
+      console.error(err);
       res.status(500).json({ message: 'خطأ في الزيادة اليدوية' });
     }
   });
 
-  // ==== حذف لاعب من التصويت ====
   app.delete('/api/vote/:id', authMiddleware('manager'), async (req, res) => {
     try {
       const playerId = new ObjectId(req.params.id);
       await votes.deleteOne({ playerId });
       await voteSessions.deleteMany({ playerId });
-      res.json({ message: 'تم الحذف من التصويت' });
-    } catch {
+      res.json({ message: 'تم حذف المرشح من التصويت' });
+    } catch (err) {
+      console.error(err);
       res.status(500).json({ message: 'خطأ في حذف التصويت' });
     }
   });
 
-  // ==== تشغيل الخادم ====
+  app.post('/api/vote/start', authMiddleware('manager'), async (req, res) => {
+    try {
+      const endDate = new Date(Date.now() + 24 * 60 * 60 * 1000);
+      await voteEndTime.updateOne(
+        { _id: 'vote_end' },
+        { $set: { endTime: endDate } },
+        { upsert: true }
+      );
+      res.json({ message: 'تم بدء التصويت' });
+    } catch (err) {
+      console.error('Start Vote Error:', err);
+      res.status(500).json({ message: 'خطأ في بدء التصويت' });
+    }
+  });
+
+  app.get('/api/vote/endtime', async (req, res) => {
+    try {
+      const doc = await voteEndTime.findOne({ _id: 'vote_end' });
+      res.json({ endTime: doc?.endTime || null });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ message: 'خطأ في جلب وقت انتهاء التصويت' });
+    }
+  });
+
   app.listen(port, () => {
     console.log(`🚀 Server running on port ${port}`);
   });
