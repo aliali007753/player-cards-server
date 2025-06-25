@@ -31,11 +31,11 @@ curl -X POST https://player-cards-server.onrender.com/api/users ^
 curl -X POST https://player-cards-server.onrender.com/api/users ^
  -H "Authorization: Bearer %TOKEN%" ^
  -H "Content-Type: application/json" ^
- -d "{\"username\": \"AbdullahAmeen2\", \"password\": \"aa00774411\", \"role\": \"supervisor\"}"
+ -d "{\"username\": \"Amer.adham\", \"password\": \"aa00774411\", \"role\": \"supervisor\"}"
 
 curl -X POST https://player-cards-server.onrender.com/api/users ^
  -H "Authorization: Bearer %TOKEN%" ^
  -H "Content-Type: application/json" ^
- -d "{\"username\": \"AhmedHazem2\", \"password\": \"aa00774411\", \"role\": \"supervisor\"}"
+ -d "{\"username\": \"khalf.muhammad\", \"password\": \"aa00774411\", \"role\": \"supervisor\"}"
 
 pause

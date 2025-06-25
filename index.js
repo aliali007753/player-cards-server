@@ -97,6 +97,36 @@ async function run() {
       res.status(500).json({ message: 'خطأ في تسجيل الدخول' });
     }
   });
+// ==== إضافة مستخدم جديد (مدير أو مشرف) ====
+app.post('/api/users', authMiddleware('manager'), async (req, res) => {
+  try {
+    const { username, password, role } = req.body;
+
+    if (!username || !password || !role) {
+      return res.status(400).json({ message: 'جميع الحقول مطلوبة' });
+    }
+
+    const existing = await users.findOne({ username });
+    if (existing) {
+      return res.status(409).json({ message: 'اسم المستخدم موجود بالفعل' });
+    }
+
+    const hashed = await bcrypt.hash(password, 10);
+    await users.insertOne({
+      username,
+      password: hashed,
+      role,
+      blocked: false,
+      uploadCount: 0,
+      createdAt: new Date()
+    });
+
+    res.status(201).json({ message: '✅ تم إنشاء المستخدم بنجاح' });
+  } catch (err) {
+    console.error("Create user error:", err);
+    res.status(500).json({ message: 'فشل في إنشاء المستخدم' });
+  }
+});
 
   // ==== إضافة لاعب ====
   app.post('/api/players', authMiddleware(), upload.single('image'), async (req, res) => {
