@@ -162,7 +162,19 @@ app.post('/api/users', authMiddleware('manager'), async (req, res) => {
       res.status(500).json({ message: 'فشل رفع الصورة أو حفظ البيانات' });
     }
   });
-
+// ==== حذف لاعب ====
+app.delete('/api/players/:id', authMiddleware('manager'), async (req, res) => {
+  try {
+    const playerId = new ObjectId(req.params.id);
+    await players.deleteOne({ _id: playerId });
+    await votes.deleteOne({ playerId });
+    await voteSessions.deleteMany({ playerId });
+    res.json({ message: 'تم حذف اللاعب' });
+  } catch (err) {
+    console.error("Delete player error:", err);
+    res.status(500).json({ message: 'فشل في حذف اللاعب' });
+  }
+});
   // ==== عرض اللاعبين ====
   app.get('/api/players', async (req, res) => {
     try {
